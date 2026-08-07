@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Time — Recover my illustration review</title>
+<style>
+  :root { --bg:#faf8f5; --card:#fff; --ink:#2b2b2b; --sub:#7a7268; --line:#eadfd3;
+          --accent:#6b8f71; --warn:#c98a3c; --rej:#c15b53; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  main { max-width:760px; margin:0 auto; padding:32px 22px 60px; }
+  h1 { font-size:24px; margin:0 0 6px; }
+  .lede { color:var(--sub); margin:0 0 26px; }
+  .note { background:#fff8ec; border:1px solid #f0dcbc; border-left:4px solid var(--warn);
+          border-radius:10px; padding:14px 16px; margin:0 0 26px; font-size:14px; }
+  .note b { color:#8a6224; }
+  .bucket { background:var(--card); border:1px solid var(--line); border-radius:14px;
+            padding:18px 20px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.03); }
+  .bucket.empty { opacity:.55; }
+  .bucket h2 { margin:0 0 2px; font-size:18px; }
+  .bucket .meta { color:var(--sub); font-size:13px; margin:0 0 12px; }
+  .count { font-weight:700; color:var(--accent); }
+  .count.zero { color:var(--rej); }
+  button { cursor:pointer; font:inherit; border:1px solid var(--line); background:#fff;
+           border-radius:9px; padding:9px 16px; margin-right:8px; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .none { background:#fff; border:1px solid var(--line); border-radius:14px; padding:22px;
+          text-align:center; color:var(--sub); }
+  code { font:13px/1.4 ui-monospace,monospace; background:#f2ede5; padding:1px 5px; border-radius:4px; }
+  .allbar { margin:24px 0 8px; padding-top:20px; border-top:1px solid var(--line); }
+  .ok { color:var(--accent); font-weight:600; }
+</style></head><body>
+<main>
+  <h1>Recover my illustration review</h1>
+  <p class="lede">This page reads the review feedback saved in <b>this browser</b> and lets you
+  download it. It only reads. Nothing here deletes or changes your work.</p>
+
+  <div class="note">
+    <b>Before anything else:</b> do not clear your browsing data, and do not open the review
+    in a different browser or a private/incognito window. Your feedback is stored in this
+    browser only. Download it here first, then send the file to Steve.
+  </div>
+
+  <div id="out"></div>
+
+  <div class="allbar">
+    <button class="primary" id="dlAll">Download a full backup of everything (JSON)</button>
+    <span id="allNote" style="color:var(--sub);font-size:13px"></span>
+  </div>
+</main>
+
+<script>
+// ---- read-only scan of every review key this site has saved -------------------
+const DECKS = [
+  { prefix: 'lt_review_12_24_',    label: '12–24 month activity illustrations' },
+  { prefix: 'lt_review_milestones_', label: 'Milestone illustrations' },
+];
+const RESERVED = 'who';
+
+function readJSON(k) { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) { return {}; } }
+function isReviewed(s) { return !!(s && (s.pick || s.verdict || (s.flags && s.flags.length) || s.notes)); }
+function csvCell(v) { v = (v == null ? '' : String(v)); return '"' + v.replace(/"/g, '""') + '"'; }
+
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime || 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function toCSV(entries, reviewer, storedUnder) {
+  const rows = [['cell_id','reviewer','best_variant','verdict','flags','notes','stored_under','exported_at']];
+  const now = new Date().toISOString();
+  for (const [id, s] of entries) {
+    if (!isReviewed(s)) continue;
+    rows.push([id, reviewer, s.pick || '', s.verdict || '', (s.flags || []).join('|'), s.notes || '',
+               storedUnder, now]);
+  }
+  return rows.map(r => r.map(csvCell).join(',')).join('\n');
+}
+
+// ---- collect ------------------------------------------------------------------
+const found = [];
+const allKeys = Object.keys(localStorage);
+for (const deck of DECKS) {
+  for (const key of allKeys) {
+    if (!key.startsWith(deck.prefix)) continue;
+    const reviewer = key.slice(deck.prefix.length);
+    if (reviewer === RESERVED || !reviewer) continue;      // '_who' is a pointer, not data
+    const entries = Object.entries(readJSON(key)).filter(([, s]) => isReviewed(s));
+    found.push({ key, deck: deck.label, reviewer, entries });
+  }
+}
+// the 0-12 tool stores one key per cell under a different prefix
+const legacy = allKeys.filter(k => k.startsWith('ltrevfull:'));
+if (legacy.length) {
+  found.push({
+    key: 'ltrevfull:*', deck: '0–12 month tool (older format)', reviewer: 'unlabelled',
+    entries: legacy.map(k => [k.slice('ltrevfull:'.length), readJSON(k)])
+                   .filter(([, s]) => isReviewed(s)),
+  });
+}
+found.sort((a, b) => b.entries.length - a.entries.length);
+
+// ---- render -------------------------------------------------------------------
+const out = document.getElementById('out');
+const withData = found.filter(f => f.entries.length > 0);
+
+if (!found.length) {
+  out.innerHTML = '<div class="none"><p><b>No saved review found in this browser.</b></p>'
+    + '<p>That means the feedback was entered in a different browser, a different device, '
+    + 'a private/incognito window, or from a file opened directly off the desktop '
+    + '(a <code>file://</code> address rather than this website). Try the exact browser and '
+    + 'window you reviewed in, then reload this page.</p></div>';
+} else {
+  for (const f of found) {
+    const n = f.entries.length;
+    const div = document.createElement('div');
+    div.className = 'bucket' + (n ? '' : ' empty');
+    div.innerHTML =
+      '<h2>' + f.deck + '</h2>'
+      + '<p class="meta">saved under reviewer name <code>' + f.reviewer + '</code> · storage key <code>'
+      + f.key + '</code></p>'
+      + '<p><span class="count' + (n ? '' : ' zero') + '">' + n + '</span> reviewed '
+      + (n === 1 ? 'image' : 'images') + ' found.</p>';
+    if (n) {
+      const who = document.createElement('select');
+      for (const opt of ['darien', 'frances', f.reviewer]) {
+        if ([...who.options].some(o => o.value === opt)) continue;
+        who.add(new Option(opt, opt));
+      }
+      who.value = f.reviewer;
+      const label = document.createElement('p');
+      label.style.cssText = 'font-size:14px;margin:0 0 12px';
+      label.textContent = 'These reviews were actually done by: ';
+      label.appendChild(who);
+      div.appendChild(label);
+
+      const b = document.createElement('button');
+      b.className = 'primary';
+      b.textContent = 'Download ' + (n === 1 ? 'it' : 'these ' + n) + ' as CSV';
+      b.addEventListener('click', () => {
+        download('lt_review_recovered_' + who.value + '_' + new Date().toISOString().slice(0, 10) + '.csv',
+                 toCSV(f.entries, who.value, f.reviewer));
+        b.textContent = 'Downloaded ✓';
+      });
+      div.appendChild(b);
+    }
+    out.appendChild(div);
+  }
+  if (!withData.length) {
+    const p = document.createElement('div');
+    p.className = 'none';
+    p.innerHTML = '<b>The review was opened in this browser, but no feedback was saved.</b><br>'
+      + 'Nothing was written to storage, so there is nothing to recover here.';
+    out.appendChild(p);
+  }
+}
+
+// ---- full backup --------------------------------------------------------------
+const dump = {};
+for (const k of allKeys) { if (k.startsWith('lt_review') || k.startsWith('ltrev')) dump[k] = localStorage.getItem(k); }
+const dumpKeys = Object.keys(dump);
+document.getElementById('allNote').textContent =
+  dumpKeys.length + ' storage ' + (dumpKeys.length === 1 ? 'key' : 'keys') + ' on this site.';
+const allBtn = document.getElementById('dlAll');
+allBtn.disabled = !dumpKeys.length;
+allBtn.addEventListener('click', () => {
+  download('lt_review_full_backup_' + new Date().toISOString().slice(0, 10) + '.json',
+           JSON.stringify(dump, null, 2), 'application/json');
+  allBtn.textContent = 'Backup downloaded ✓';
+});
+</script>
+</body></html>
